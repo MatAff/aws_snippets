@@ -1,15 +1,36 @@
 
+"""Document Common AWS SDK Operations
+
+This script is used to document common AWS operations, 
+as well as provide a working example of setting up an
+environment.
+"""
+
+import json
+import os
+
 import boto3
 import pandas as pd
 
 pd.options.display.max_colwidth = 200
 
-ec2_client = boto3.client('ec2')
-ec2_res = boto3.resource('ec2')
+# --- SETTINGS ---
 
-# TODO: track create resources and store in json for easy deletion
+path_resources = './resources.json'
+
+purpose = 'aws_exploration'
+
+# --- RESOURCE TRACKING ---
+
+if os.path.exists(path_resources):
+    resource_dict = json.load(open(path_resources))
+else:
+    resource_dict = {'resources': []}
 
 # --- VPC ---
+
+ec2_client = boto3.client('ec2')
+ec2_res = boto3.resource('ec2')
 
 # list vpc
 vpcs = ec2_client.describe_vpcs()
@@ -17,9 +38,105 @@ vpcs_df = pd.DataFrame(vpcs['Vpcs'])
 vpcs_df
 
 # create vpc
-response = ec2_client.create_vpc(CidrBlock='10.0.0.0/24')
+tag_spec=[{'ResourceType': 'vpc', 'Tags': [{'Key': 'purpose', 'Value': purpose}]}]
+response = ec2_client.create_vpc(
+    CidrBlock='10.0.0.0/24', 
+    TagSpecifications=tag_spec
+)
+
+# track created resources
+resource_dict['resources'].append(response)
+json.dump(resource_dict, open(path_resources, 'w'), indent=4)
+
+# vpc id
 vpc_id = response['Vpc']['VpcId']
 print(vpc_id)
+
+# instanciate by id
+vpc = ec2_res.Vpc(vpc_id)
+
+# # delete vpc
+# ec2_client.delete_vpc(VpcId=vpc_id) # delete vpc
+
+# --- IGW ---
+
+# list internet gateways
+igws = ec2_client.describe_internet_gateways()
+igws_df = pd.DataFrame(igws['InternetGateways'])
+igws_df
+
+# # get existing igw
+# igw_id = igws_df.InternetGatewayId.iloc[0]
+# print(igw_id)
+
+# create internet gateway
+tag_spec=[{'ResourceType': 'internet-gateway', 'Tags': [{'Key': 'purpose', 'Value': purpose}]}]
+igw_response = ec2_client.create_internet_gateway(TagSpecifications=tag_spec)
+igw_id = igw_response['InternetGateway']['InternetGatewayId']
+print(igw_id)
+
+# track created resources
+resource_dict['resources'].append(igw_response)
+json.dump(resource_dict, open(path_resources, 'w'), indent=4)
+
+# instanciate by id
+igw = ec2_res.InternetGateway(igw_id)
+
+# attach to vpc
+igw.attach_to_vpc(VpcId=vpc_id)
+
+# # detach and delete igw
+# vpc.detach_internet_gateway(InternetGatewayId=igw_id)
+# ec2_client.delete_internet_gateway(InternetGatewayId=igw_id)
+
+# --- SUBNET ---
+
+# TODO: figure out how to make public
+# map_public_ip_on_launch
+
+
+# list subnets
+subnets = ec2_client.describe_subnets()
+subnet_df = pd.DataFrame(subnets['Subnets'])
+vpc_subnets_df = subnet_df[subnet_df.VpcId==vpc_id]
+vpc_subnets_df
+
+# create public subnets
+subnet_response = ec2_client.create_subnet(
+    VpcId=vpc_id,
+    CidrBlock='10.0.0.0/28',
+    AvailabilityZone='us-east-1a'
+)
+subnet_id = subnet_response['Subnet']['SubnetId']
+print(subnet_id)
+
+# track created resources
+resource_dict['resources'].append(subnet_response)
+json.dump(resource_dict, open(path_resources, 'w'), indent=4)
+
+# instanciate by id
+subnet = ec2_res.InternetGateway(subnet_id)
+
+# # delete
+# ec2_client.delete_subnet(SubnetId=subnet_id)
+
+# --- CLEAN UP ---
+
+# TODO: get vpc_subnets_df
+
+# delete vpc associated subnets
+for subnet_id in vpc_subnets_df.SubnetId.values:
+    print(subnet_id)
+    ec2_client.delete_subnet(SubnetId=subnet_id)
+
+# detach and delete igw
+vpc.detach_internet_gateway(InternetGatewayId=igw_id)
+ec2_client.delete_internet_gateway(InternetGatewayId=igw_id)
+
+# delete vpc
+ec2_client.delete_vpc(VpcId=vpc_id) # delete vpc
+
+assert False
 
 # --- SUBNET ---
 
@@ -57,8 +174,6 @@ ec2_client.create_subnet(
     AvailabilityZone='us-east-1b'
 )
 
-# TODO: figure out how to make public
-# map_public_ip_on_launch
 
 # --- SECURITY GROUP ---
 
@@ -149,30 +264,6 @@ ec2_client.delete_key_pair(KeyName=key_name)
 # --- ACL ---
 
 
-# --- IGW ---
-
-# list internet gateways
-igws = ec2_client.describe_internet_gateways()
-igws_df = pd.DataFrame(igws['InternetGateways'])
-igws_df
-
-# get existing igw
-igw_id = igws_df.InternetGatewayId.iloc[0]
-print(igw_id)
-
-# create internet gateway
-igw = ec2_client.create_internet_gateway()
-igw_id = igw['InternetGateway']['InternetGatewayId']
-print(igw_id)
-
-# instanciate by id
-igw = ec2_res.InternetGateway(igw_id)
-
-# attach to vpc
-igw.attach_to_vpc(VpcId=vpc_id)
-
-# delete igw
-# ec2_client.delete_internet_gateway(InternetGatewayId=igw_id)
 
 # --- VPG ----
 
