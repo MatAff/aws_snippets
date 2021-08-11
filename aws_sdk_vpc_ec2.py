@@ -4,6 +4,8 @@
 This script is used to document common AWS operations, 
 as well as provide a working example of setting up an
 environment.
+
+Initial goal, spin up vpc, with public subnet, ec2 hosing a small site
 """
 
 import json
@@ -120,6 +122,99 @@ subnet = ec2_res.InternetGateway(subnet_id)
 # # delete
 # ec2_client.delete_subnet(SubnetId=subnet_id)
 
+# --- SECURITY GROUP ---
+
+# list
+sgs = ec2_client.describe_security_groups()
+sgs_df = pd.DataFrame(sgs['SecurityGroups'])
+sgs_df
+
+sg_name = "http"
+sg_desc = "http"
+sg_http = ec2_client.create_security_group(GroupName=sg_name, Description=sg_desc)
+
+# permissions
+ip_permissions = [
+    {
+        # HTTP ingress open to anyone
+        'IpProtocol': 'tcp', 'FromPort': 80, 'ToPort': 80,
+        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+    },
+    {
+        # HTTPS ingress open to anyone
+        'IpProtocol': 'tcp', 'FromPort': 443, 'ToPort': 443,
+        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+    },
+    {
+        'IpProtocol': 'tcp', 'FromPort': 22, 'ToPort': 22,
+        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+    }
+]
+ec2_client.authorize_security_group_ingress(
+    GroupName=sg_name,
+    IpPermissions=ip_permissions
+)
+
+# delete security group
+ec2_client.delete_security_group(GroupName=sg_name)
+
+
+# --- SSM --
+
+ssm_client = boto3.client('ssm')
+
+ami_params = ssm_client.get_parameters_by_path(Path='/aws/service/ami-amazon-linux-latest')
+ami_df = pd.DataFrame(ami_params['Parameters'])
+
+# subset
+amzn2_amis = [ap for ap in ami_params['Parameters'] if
+                all(query in ap['Name'] for query
+                    in ('amzn2', 'x86_64', 'gp2'))]
+
+# select first one
+ami_image_id = amzn2_amis[0]['Value']
+print(ami_image_id)
+
+# --- EC2 ---
+
+https://docs.aws.amazon.com/code-samples/latest/catalog/python-ec2-ec2_basics-ec2_basics_demo.py.html
+
+# create key pair
+key_name = 'my_key'
+key_pair = ec2_client.create_key_pair(KeyName=key_name)
+with open(key_name, 'w') as file:
+    file.write(str(key_pair))
+
+# ec2 settings
+image_id = ami_image_id
+instance_type = 't2.micro'
+key_name = key_name
+user_data = """
+touch test.txt
+"""
+
+# create instance
+instance_params = {
+    'ImageId': image_id,
+    'InstanceType': instance_type,
+    'KeyName': key_name,
+    'SecurityGroups': (sg_name, ),
+    'UserData': user_data,
+}
+instance = ec2_res.create_instances(**instance_params, MinCount=1, MaxCount=1)[0]
+
+# terminate instance
+ec2_client.terminate_instances(InstanceIds=(instance.id,))
+
+# delete key
+ec2_client.delete_key_pair(KeyName=key_name)
+
+# --- ACL ---
+
+
+
+assert False
+
 # --- CLEAN UP ---
 
 # TODO: get vpc_subnets_df
@@ -175,93 +270,9 @@ ec2_client.create_subnet(
 )
 
 
-# --- SECURITY GROUP ---
 
-# list
-sgs = ec2_client.describe_security_groups()
-sgs_df = pd.DataFrame(sgs['SecurityGroups'])
-sgs_df
 
-sg_name = "http"
-sg_desc = "http"
-sg_http = ec2_client.create_security_group(GroupName=sg_name, Description=sg_desc)
 
-# permissions
-ip_permissions = [
-    {
-        # HTTP ingress open to anyone
-        'IpProtocol': 'tcp', 'FromPort': 80, 'ToPort': 80,
-        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-    },
-    {
-        # HTTPS ingress open to anyone
-        'IpProtocol': 'tcp', 'FromPort': 443, 'ToPort': 443,
-        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-    },
-    {
-        'IpProtocol': 'tcp', 'FromPort': 22, 'ToPort': 22,
-        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-    }
-]
-ec2_client.authorize_security_group_ingress(
-    GroupName=sg_name,
-    IpPermissions=ip_permissions
-)
-
-# delete security group
-ec2_client.delete_security_group(GroupName=sg_name)
-
-# --- SSM --
-
-ssm_client = boto3.client('ssm')
-
-ami_params = ssm_client.get_parameters_by_path(Path='/aws/service/ami-amazon-linux-latest')
-ami_df = pd.DataFrame(ami_params['Parameters'])
-
-# subset
-amzn2_amis = [ap for ap in ami_params['Parameters'] if
-                all(query in ap['Name'] for query
-                    in ('amzn2', 'x86_64', 'gp2'))]
-
-# select first one
-ami_image_id = amzn2_amis[0]['Value']
-print(ami_image_id)
-
-# --- EC2 ---
-
-https://docs.aws.amazon.com/code-samples/latest/catalog/python-ec2-ec2_basics-ec2_basics_demo.py.html
-
-# create key pair
-key_name = 'my_key'
-key_pair = ec2_client.create_key_pair(KeyName=key_name)
-with open(key_name, 'w') as file:
-    file.write(str(key_pair))
-
-# ec2 settings
-image_id = ami_image_id
-instance_type = 't2.micro'
-key_name = key_name
-user_data = """
-touch test.txt
-"""
-
-# create instance
-instance_params = {
-    'ImageId': image_id,
-    'InstanceType': instance_type,
-    'KeyName': key_name,
-    'SecurityGroups': (sg_name, ),
-    'UserData': user_data,
-}
-instance = ec2_res.create_instances(**instance_params, MinCount=1, MaxCount=1)[0]
-
-# terminate instance
-ec2_client.terminate_instances(InstanceIds=(instance.id,))
-
-# delete key
-ec2_client.delete_key_pair(KeyName=key_name)
-
-# --- ACL ---
 
 
 
