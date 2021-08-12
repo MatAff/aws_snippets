@@ -5,94 +5,28 @@ Spin up a ec2 instance and host a webserver. This is the simplified version
 of running the same in an vpc.
 """
 
-import json
-import os
-
 import boto3
 import pandas as pd
 
+import aws_security_group
+import aws_iam
+
 pd.options.display.max_colwidth = 200
-
-# --- SETTINGS ---
-
-path_resources = './resources.json'
-
-purpose = 'aws_exploration'
-
-# --- RESOURCE TRACKING ---
-
-if os.path.exists(path_resources):
-    resource_dict = json.load(open(path_resources))
-else:
-    resource_dict = {'resources': []}
-
-# --- IAM ---
-
-# --- IAM ---
-iam_res = boto3.resource('iam')
-iam_client = boto3.client('iam')
-
-# create instance profile with tag
-response = client.create_instance_profile(
-    InstanceProfileName='ec2_instance_profile',
-    Path='string',
-    Tags=[
-        {
-            'Key': 'purpose',
-            'Value': purpose
-        },
-    ]
-)
-
-
-# add role to instance profile
-
-
-
-# --- SECURITY GROUP ---
 
 ec2_client = boto3.client('ec2')
 ec2_res = boto3.resource('ec2')
 
-# list
-sgs = ec2_client.describe_security_groups()
-sgs_df = pd.DataFrame(sgs['SecurityGroups'])
-sgs_df
+# --- SETTINGS ---
 
-# create security group
-sg_name = "http"
-sg_desc = "http"
-tag_spec=[{'ResourceType': 'security-group', 'Tags': [{'Key': 'purpose', 'Value': purpose}]}]
-sg_response = ec2_client.create_security_group(GroupName=sg_name, Description=sg_desc, TagSpecifications=tag_spec)
+purpose = 'aws_exploration'
 
-# track created resources
-resource_dict['resources'].append(sg_response)
-json.dump(resource_dict, open(path_resources, 'w'), indent=4)
+# --- SECURITY GROUP ---
 
-# permissions
-ip_permissions = [
-    {
-        # HTTP ingress open to anyone
-        'IpProtocol': 'tcp', 'FromPort': 80, 'ToPort': 80,
-        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-    },
-    {
-        # HTTPS ingress open to anyone
-        'IpProtocol': 'tcp', 'FromPort': 443, 'ToPort': 443,
-        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-    },
-    {
-        'IpProtocol': 'tcp', 'FromPort': 22, 'ToPort': 22,
-        'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
-    }
-]
-ec2_client.authorize_security_group_ingress(
-    GroupName=sg_name,
-    IpPermissions=ip_permissions
-)
+sg_name = aws_security_group.get_http_security_group()
 
-# # delete security group
-# ec2_client.delete_security_group(GroupName=sg_name)
+# --- IAM ---
+
+instance_profile = aws_iam.get_instance_profile()
 
 # --- SSM --
 
@@ -122,50 +56,38 @@ with open(key_name, 'w') as file:
     file.write(str(key_pair))
 
 # ec2 settings
-image_id = ami_image_id
-instance_type = 't2.micro'
-key_name = key_name
-user_data = """
-touch test.txt
+
+user_data = """#!/bin/bash
+touch hello_world.txt
+yum update -y
+amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+yum install -y httpd mariadb-server
+systemctl start httpd
+systemctl enable httpd
+usermod -a -G apache ec2-user
+chown -R ec2-user:apache /var/www
+chmod 2775 /var/www
+find /var/www -type d -exec chmod 2775 {} \;
+find /var/www -type f -exec chmod 0664 {} \;
+echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
 """
 
-# create instance
-instance_params = {
-    'ImageId': image_id,
-    'InstanceType': instance_type,
-    'KeyName': key_name,
-    'SecurityGroups': (sg_name, ),
-    'UserData': user_data,
-}
-instance = ec2_res.create_instances(**instance_params, MinCount=1, MaxCount=1)[0]
-instance
-
-# # terminate instance
-# ec2_client.terminate_instances(InstanceIds=(instance.id,))
-
-# # delete key
-# ec2_client.delete_key_pair(KeyName=key_name)
+instances = ec2_res.create_instances(
+    ImageId=ami_image_id,
+    InstanceType='t2.micro',
+    KeyName=key_name,
+    SecurityGroups=(sg_name, ),
+    UserData=user_data,
+    IamInstanceProfile={'Name': 'ec2_instance_profile'},
+    MinCount=1, 
+    MaxCount=1
+)
+instances
 
 # --- CLEAN UP ---
 
 # delete ec2
-ec2_client.terminate_instances(InstanceIds=(instance.id,))
-
-# delete security group
-ec2_client.delete_security_group(GroupName=sg_name)
+ec2_client.terminate_instances(InstanceIds=(instances[0].id,))
 
 # delete key
 ec2_client.delete_key_pair(KeyName=key_name)
-
-# #!/bin/bash
-# yum update -y
-# amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
-# yum install -y httpd mariadb-server
-# systemctl start httpd
-# systemctl enable httpd
-# usermod -a -G apache ec2-user
-# chown -R ec2-user:apache /var/www
-# chmod 2775 /var/www
-# find /var/www -type d -exec chmod 2775 {} \;
-# find /var/www -type f -exec chmod 0664 {} \;
-# echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
