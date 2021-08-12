@@ -55,21 +55,16 @@ key_pair = ec2_client.create_key_pair(KeyName=key_name)
 with open(key_name, 'w') as file:
     file.write(str(key_pair))
 
-# ec2 settings
+# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-lamp-amazon-linux-2.html
 
 user_data = """#!/bin/bash
 touch hello_world.txt
-yum update -y
-amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
-yum install -y httpd mariadb-server
-systemctl start httpd
-systemctl enable httpd
-usermod -a -G apache ec2-user
-chown -R ec2-user:apache /var/www
-chmod 2775 /var/www
-find /var/www -type d -exec chmod 2775 {} \;
-find /var/www -type f -exec chmod 0664 {} \;
-echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
+sudo yum update -y
+sudo amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+sudo yum install -y httpd mariadb-server
+sudo systemctl start httpd
+sudo systemctl enable httpd
+sudo systemctl is-enabled httpd
 """
 
 instances = ec2_res.create_instances(
@@ -91,3 +86,24 @@ ec2_client.terminate_instances(InstanceIds=(instances[0].id,))
 
 # delete key
 ec2_client.delete_key_pair(KeyName=key_name)
+
+
+# user_data = """#!/bin/bash
+# touch hello_world.txt
+# yum update -y
+# amazon-linux-extras install -y lamp-mariadb10.2-php7.2 php7.2
+# yum install -y httpd mariadb-server
+# systemctl start httpd
+# systemctl enable httpd
+# usermod -a -G apache ec2-user
+# chown -R ec2-user:apache /var/www
+# chmod 2775 /var/www
+# find /var/www -type d -exec chmod 2775 {} \;
+# find /var/www -type f -exec chmod 0664 {} \;
+# echo "<?php phpinfo(); ?>" > /var/www/html/phpinfo.php
+# """
+
+# yum install -y httpd24 php72 mysql57-server php72-mysqlnd
+# service httpd start
+# chkconfig httpd on
+# """
