@@ -8,6 +8,8 @@ Document to process to set up a VPC, EC2 based webserver with auto scaling
 # https://gist.github.com/nguyendv/8cfd92fc8ed32ebb78e366f44c2daea6
 # https://github.com/miztiik/AWS-Demos/blob/master/How-To/setup-autoscaling-with-boto3/setup-autoscaling-with-boto3
 
+import time
+
 import boto3
 import pandas as pd
 
@@ -32,6 +34,9 @@ vpc.modify_attribute(EnableDnsSupport={'Value': True})
 vpc.modify_attribute(EnableDnsHostnames={'Value': True})
 vpc.create_tags(Tags=tags)
 
+print('created vpc')
+time.sleep(1.0)
+
 # --- SUBNET ---
 
 # list vpc subnets
@@ -41,6 +46,10 @@ subnet_df[subnet_df.VpcId==vpc.id]
 # create subnets
 subnet_az1_pub = vpc.create_subnet(CidrBlock='10.0.0.16/28', AvailabilityZone='us-east-1a')
 subnet_az2_pub = vpc.create_subnet(CidrBlock='10.0.0.32/28', AvailabilityZone='us-east-1b')
+
+print('created subnets')
+time.sleep(1.0)
+
 subnet_az1_pub.create_tags(Tags=tags)
 subnet_az2_pub.create_tags(Tags=tags)
 
@@ -54,6 +63,9 @@ igw = ec2_res.create_internet_gateway()
 igw.create_tags(Tags=tags)
 igw.attach_to_vpc(VpcId=vpc.id)
 
+print('created igw')
+time.sleep(1.0)
+
 # --- ROUTE TABLE ---
 
 # list route tables
@@ -66,6 +78,9 @@ routes = []
 routes.append(route_table.associate_with_subnet(SubnetId=subnet_az1_pub.id))
 routes.append(route_table.associate_with_subnet(SubnetId=subnet_az2_pub.id))
 int_route = route_table.create_route(DestinationCidrBlock='0.0.0.0/0', GatewayId=igw.id)
+
+print('created route table')
+time.sleep(1.0)
 
 # --- SECURITY GROUP ---
 
@@ -95,6 +110,9 @@ ec2_client.authorize_security_group_ingress(
     GroupId=sg_pub.id, IpPermissions=[{'IpProtocol': 'tcp', 'FromPort': 80, 'ToPort': 80, 'UserIdGroupPairs': [{'GroupId': sg_elb.id}]}]
 )
 
+print('created security group')
+time.sleep(1.0)
+
 # --- KEY PAIR ---
 
 # create key pair
@@ -102,6 +120,9 @@ key_name = 'my_key'
 key_pair = ec2_client.create_key_pair(KeyName=key_name)
 with open(key_name, 'w') as file:
     file.write(str(key_pair))
+
+print('created key pair')
+time.sleep(1.0)
 
 # --- SSM --
 
@@ -119,6 +140,9 @@ amzn2_amis = [ap for ap in ami_params['Parameters'] if
 ami_image_id = amzn2_amis[0]['Value']
 print(ami_image_id)
 
+print('found image')
+time.sleep(1.0)
+
 # --- EC2 ---
 
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-lamp-amazon-linux-2.html
@@ -132,6 +156,8 @@ sudo systemctl start httpd
 sudo systemctl enable httpd
 sudo systemctl is-enabled httpd
 """
+
+user_data = '\n'.join(open('user_data.sh').readlines())
 
 # # list instances
 # reservations = ec2_client.describe_instances()['Reservations']
@@ -174,6 +200,9 @@ as_launch_config = as_client.create_launch_configuration(
 )
 # as_launch_config.create_tags(Tags=tags)
 
+print('created lauch configuration')
+time.sleep(1.0)
+
 # auto scaling group
 as_subnets = subnet_az1_pub.id + "," + subnet_az2_pub.id
 as_group = as_client.create_auto_scaling_group(
@@ -198,6 +227,10 @@ as_client.create_or_update_tags(
             'PropagateAtLaunch': True
         }]
 )
+
+print('created auto scaler group')
+print('long pause')
+time.sleep(60.0)
 
 # --- LOAD BALANCER ---
 
@@ -258,6 +291,12 @@ create_listener_response = elb_client.create_listener(
     }]
 )
 
+print('created load balancer')
+time.sleep(1.0)
+
+
+assert False
+
 # --- CLEAN UP ---
 
 # delete auto scaler
@@ -266,16 +305,28 @@ as_client.delete_auto_scaling_group(
     ForceDelete=True,
 )
 
+print('deleted auto scaler')
+time.sleep(1.0)
+
 # delete launch configuration
 as_client.delete_launch_configuration(
     LaunchConfigurationName='auto_scaling_launch_config'
 )
 
+print('deleted launch configuration')
+time.sleep(1.0)
+
 # delete load balander
 elb_client.delete_load_balancer(LoadBalancerArn=lb_arn)
 
+print('deleted load balancer')
+time.sleep(5.0)
+
 # delete target group
 elb_client.delete_target_group(TargetGroupArn=tg_arn)
+
+print('deleted target group')
+time.sleep(1.0)
 
 # get instances
 reservations = ec2_client.describe_instances()['Reservations']
@@ -286,6 +337,10 @@ ec2_vpc_df
 # terminate instances
 ec2_client.terminate_instances(InstanceIds=ec2_vpc_df.InstanceId.tolist())
 
+print('initialized terminating instances')
+print('long pause')
+time.sleep(20.0)
+
 # # delete ec2
 # ec2_client.terminate_instances(InstanceIds=(instances[0].id,))
 # instances[0].wait_until_terminated()
@@ -293,13 +348,23 @@ ec2_client.terminate_instances(InstanceIds=ec2_vpc_df.InstanceId.tolist())
 # delete key
 ec2_client.delete_key_pair(KeyName=key_name)
 
+print('deleted key')
+print('long pause')
+time.sleep(60.0)
+
 # delete security group
 ec2_client.delete_security_group(GroupId=sg_pub.id)
 ec2_client.delete_security_group(GroupId=sg_elb.id)
 
+print('deleted security group')
+time.sleep(1.0)
+
 # delete subnet
 ec2_client.delete_subnet(SubnetId=subnet_az1_pub.id)
 ec2_client.delete_subnet(SubnetId=subnet_az2_pub.id)
+
+print('deleted subnet')
+time.sleep(1.0)
 
 # # delete vpc associated subnets
 # for subnet_id in vpc_subnets_df.SubnetId.values:
@@ -309,11 +374,21 @@ ec2_client.delete_subnet(SubnetId=subnet_az2_pub.id)
 # delete route table
 ec2_client.delete_route_table(RouteTableId=route_table.id)
 
+print('deleted route table')
+time.sleep(1.0)
+
 # detach and delete igw
 vpc.detach_internet_gateway(InternetGatewayId=igw.id)
 ec2_client.delete_internet_gateway(InternetGatewayId=igw.id)
 
+print('deleted igw')
+time.sleep(1.0)
+
 # delete vpc
 ec2_client.delete_vpc(VpcId=vpc.id) # delete vpc
+
+print('deleted vpc')
+time.sleep(1.0)
+
 
 print('finished')
