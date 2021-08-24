@@ -22,13 +22,26 @@ s3_client.create_bucket(Bucket=bucket_name)
 
 # add a file
 with open('sample.txt', 'w') as file:
-    file.writelines([])
+    file.writelines(['hello world'])
 s3_client.upload_file('sample.txt', bucket_name, 'sample')
 
 # list files
 objects = s3_client.list_objects(Bucket=bucket_name)
 objects_df = pd.DataFrame(objects['Contents'])
 objects_df
+
+# read file
+obj = s3_res.Object(bucket_name, 'sample')
+text = obj.get()['Body'].read()
+print(text)
+
+# alter
+text = text.upper()
+print(text)
+
+# put
+obj = s3_res.Object(bucket_name, 'sample')
+obj.put(Body=text)
 
 # download a file
 s3_client.download_file(bucket_name, 'sample', 'sample.txt')
